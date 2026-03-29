@@ -124,9 +124,29 @@ async function buildHooks() {
       }
     });
 
+    // Post-process: fix esbuild's hardcoded __dirname/__filename in bundled output.
+    // esbuild wraps each module in its own scope and injects the build machine's
+    // absolute path as `var __dirname = "/Users/...";`. The banner only sets these
+    // at the top-level scope, so inner scopes shadow it with stale paths.
+    // Replace all hardcoded path literals with Bun's runtime equivalents.
+    const workerPath = `${hooksDir}/${WORKER_SERVICE.name}.cjs`;
+    let workerContent = fs.readFileSync(workerPath, 'utf-8');
+    const dirnamesBefore = (workerContent.match(/\b__dirname\s*=\s*"\/[^"]*"/g) || []).length;
+    const filenamesBefore = (workerContent.match(/\b__filename\s*=\s*"\/[^"]*"/g) || []).length;
+    workerContent = workerContent.replace(
+      /\b__dirname\s*=\s*"\/[^"]*"/g,
+      '__dirname=import.meta.dir'
+    );
+    workerContent = workerContent.replace(
+      /\b__filename\s*=\s*"\/[^"]*"/g,
+      '__filename=import.meta.path'
+    );
+    fs.writeFileSync(workerPath, workerContent);
+    console.log(`✓ post-processed: replaced ${dirnamesBefore} __dirname + ${filenamesBefore} __filename hardcoded paths`);
+
     // Make worker service executable
-    fs.chmodSync(`${hooksDir}/${WORKER_SERVICE.name}.cjs`, 0o755);
-    const workerStats = fs.statSync(`${hooksDir}/${WORKER_SERVICE.name}.cjs`);
+    fs.chmodSync(workerPath, 0o755);
+    const workerStats = fs.statSync(workerPath);
     console.log(`✓ worker-service built (${(workerStats.size / 1024).toFixed(2)} KB)`);
 
     // Build MCP server
